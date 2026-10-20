@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   FlatList,
   Keyboard,
@@ -14,13 +15,16 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useChat } from '../lib/ChatContext';
+import { INTRO_LIMIT, useConnections } from '../lib/connections';
 import { USE_NATIVE_DRIVER, useTheme, type Theme } from '../lib/theme';
 import type { Message } from '../lib/types';
 import { dayKey, dayLabel, lastSeenLabel } from '../lib/utils';
 import { Avatar } from './Avatar';
 import { MessageBubble } from './MessageBubble';
+import { PeerActionsModal } from './PeerActionsModal';
 import { TypingBubble } from './TypingIndicator';
 
 const EMPTY_LIST: Message[] = [];
@@ -102,6 +106,7 @@ export function ChatScreen({ peerId, onBack }: { peerId: string; onBack: () => v
   const insets = useSafeAreaInsets();
   const { me, users, messages, onlineIds, typingIds, sendMessage, retryMessage, notifyTyping, stopTyping, setActivePeer } =
     useChat();
+  const { byPeer, respond } = useConnections();
 
   const peer = users.find((u) => u.id === peerId);
   const list = messages[peerId] ?? EMPTY_LIST;
@@ -109,22 +114,33 @@ export function ChatScreen({ peerId, onBack }: { peerId: string; onBack: () => v
   const isOnline = onlineIds.has(peerId);
   const isTyping = !!typingIds[peerId];
 
+  // Message request state for this conversation.
+  const conn = byPeer[peerId];
+  const incomingReq = !!conn && conn.status === 'pending' && !conn.iRequested; // they asked me
+  const waiting = !!conn && conn.status === 'pending' && conn.iRequested; // I asked them
+  const sentCount = useMemo(() => list.reduce((n, m) => n + (m.sender_id === meId ? 1 : 0), 0), [list, meId]);
+  const limitReached = waiting && sentCount >= INTRO_LIMIT;
+
   const [text, setText] = useState('');
   const [showFab, setShowFab] = useState(false);
   const [newCount, setNewCount] = useState(0);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [deciding, setDeciding] = useState(false);
+  const [decideError, setDecideError] = useState<string | null>(null);
   const listRef = useRef<FlatList<Row>>(null);
   const showFabRef = useRef(false);
   const lastIdRef = useRef<string | null>(null);
 
   // Tell the provider which chat is open (drives read receipts).
+  // While a request is unanswered we do NOT mark the chat as open, so the sender gets no read receipt.
   useEffect(() => {
-    setActivePeer(peerId);
+    setActivePeer(incomingReq ? null : peerId);
     return () => {
       setActivePeer(null);
       stopTyping(peerId);
     };
-  }, [peerId, setActivePeer, stopTyping]);
+  }, [peerId, incomingReq, setActivePeer, stopTyping]);
 
   // Keyboard visibility decides whether to add the bottom safe-area padding.
   useEffect(() => {
@@ -191,17 +207,33 @@ export function ChatScreen({ peerId, onBack }: { peerId: string; onBack: () => v
 
   const handleSend = useCallback(() => {
     const value = text.trim();
-    if (!value) return;
+    if (!value || limitReached) return;
     setText('');
     stopTyping(peerId);
     void sendMessage(peerId, value);
     requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
-  }, [text, peerId, sendMessage, stopTyping]);
+  }, [text, peerId, sendMessage, stopTyping, limitReached]);
 
   const handleBack = useCallback(() => {
     Keyboard.dismiss();
     onBack();
   }, [onBack]);
+
+  const decide = useCallback(
+    async (accept: boolean) => {
+      setDeciding(true);
+      setDecideError(null);
+      try {
+        await respond(peerId, accept);
+        if (!accept) onBack();
+      } catch (e) {
+        setDecideError(e instanceof Error ? e.message : 'Something went wrong.');
+      } finally {
+        setDeciding(false);
+      }
+    },
+    [respond, peerId, onBack]
+  );
 
   const renderItem = useCallback(
     ({ item }: ListRenderItemInfo<Row>) => {
@@ -223,7 +255,8 @@ export function ChatScreen({ peerId, onBack }: { peerId: string; onBack: () => v
 
   const statusText = isTyping ? 'typing…' : isOnline ? 'online' : lastSeenLabel(peer.last_seen);
   const statusColor = isTyping ? '#9BF2CF' : theme.headerSubText;
-  const canSend = text.trim().length > 0;
+  const canSend = text.trim().length > 0 && !limitReached;
+  const remaining = Math.max(0, INTRO_LIMIT - sentCount);
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.chatBackground }}>
@@ -238,6 +271,9 @@ export function ChatScreen({ peerId, onBack }: { peerId: string; onBack: () => v
           </Text>
           <StatusLine text={statusText} color={statusColor} />
         </View>
+        <Pressable onPress={() => setMenuOpen(true)} hitSlop={12} style={styles.menuBtn} accessibilityLabel="More">
+          <Ionicons name="ellipsis-vertical" size={22} color={theme.headerText} />
+        </Pressable>
       </View>
 
       <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding">
@@ -252,7 +288,7 @@ export function ChatScreen({ peerId, onBack }: { peerId: string; onBack: () => v
             scrollEventThrottle={16}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={{ paddingVertical: 10 }}
-            ListHeaderComponent={isTyping ? <TypingBubble theme={theme} /> : null}
+            ListHeaderComponent={isTyping ? <TypingBubble theme={theme} /> : undefined}
           />
 
           {rows.length === 0 && !isTyping ? (
@@ -266,29 +302,91 @@ export function ChatScreen({ peerId, onBack }: { peerId: string; onBack: () => v
           <ScrollFab visible={showFab} count={newCount} onPress={scrollToBottom} theme={theme} />
         </View>
 
-        <View style={[styles.inputBar, { paddingBottom: keyboardOpen ? 6 : insets.bottom + 6 }]}>
-          <View style={[styles.inputWrap, { backgroundColor: theme.inputBg }]}>
-            <TextInput
-              style={[styles.input, { color: theme.text }, webReset]}
-              placeholder="Message"
-              placeholderTextColor={theme.subText}
-              value={text}
-              onChangeText={handleChange}
-              multiline
-              maxLength={4000}
-              underlineColorAndroid="transparent"
-              onKeyPress={(e) => {
-                const native = e.nativeEvent as unknown as { key: string; shiftKey?: boolean };
-                if (Platform.OS === 'web' && native.key === 'Enter' && !native.shiftKey) {
-                  e.preventDefault();
-                  handleSend();
-                }
-              }}
-            />
+        {incomingReq ? (
+          /* they asked to chat: accept, decline, or block before replying */
+          <View
+            style={[
+              styles.requestBar,
+              { backgroundColor: theme.background, borderTopColor: theme.divider, paddingBottom: insets.bottom + 12 },
+            ]}
+          >
+            <Text style={[styles.requestTitle, { color: theme.text }]}>{peer.username} wants to message you</Text>
+            <Text style={[styles.requestText, { color: theme.subText }]}>
+              Accept to reply. They will not see that you read their messages until you do.
+            </Text>
+            {decideError ? <Text style={[styles.requestText, { color: theme.danger }]}>{decideError}</Text> : null}
+            <View style={styles.requestBtns}>
+              <Pressable
+                onPress={() => void decide(true)}
+                disabled={deciding}
+                style={[styles.reqBtn, { backgroundColor: theme.accent, opacity: deciding ? 0.7 : 1 }]}
+              >
+                {deciding ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.reqBtnLight}>Accept</Text>}
+              </Pressable>
+              <Pressable
+                onPress={() => void decide(false)}
+                disabled={deciding}
+                style={[styles.reqBtn, { backgroundColor: theme.searchBg, opacity: deciding ? 0.7 : 1 }]}
+              >
+                <Text style={[styles.reqBtnText, { color: theme.text }]}>Decline</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => setMenuOpen(true)}
+                disabled={deciding}
+                style={[styles.reqBtn, { backgroundColor: theme.searchBg, opacity: deciding ? 0.7 : 1 }]}
+              >
+                <Text style={[styles.reqBtnText, { color: theme.danger }]}>Block</Text>
+              </Pressable>
+            </View>
           </View>
-          <SendButton enabled={canSend} onPress={handleSend} color={theme.accent} />
-        </View>
+        ) : (
+          <>
+            {waiting ? (
+              <View style={[styles.notice, { backgroundColor: theme.chipBg }]}>
+                <Text style={{ color: theme.chipText, fontSize: 13, textAlign: 'center' }}>
+                  {limitReached
+                    ? `Waiting for ${peer.username} to accept. You can send more once they do.`
+                    : `Waiting for ${peer.username} to accept. You can send ${remaining} more ${
+                        remaining === 1 ? 'message' : 'messages'
+                      }.`}
+                </Text>
+              </View>
+            ) : null}
+
+            <View style={[styles.inputBar, { paddingBottom: keyboardOpen ? 6 : insets.bottom + 6 }]}>
+              <View style={[styles.inputWrap, { backgroundColor: theme.inputBg }]}>
+                <TextInput
+                  style={[styles.input, { color: theme.text }, webReset]}
+                  placeholder={limitReached ? 'Waiting for them to accept…' : 'Message'}
+                  placeholderTextColor={theme.subText}
+                  value={text}
+                  onChangeText={handleChange}
+                  editable={!limitReached}
+                  multiline
+                  maxLength={4000}
+                  underlineColorAndroid="transparent"
+                  onKeyPress={(e) => {
+                    const native = e.nativeEvent as unknown as { key: string; shiftKey?: boolean };
+                    if (Platform.OS === 'web' && native.key === 'Enter' && !native.shiftKey) {
+                      e.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                />
+              </View>
+              <SendButton enabled={canSend} onPress={handleSend} color={theme.accent} />
+            </View>
+          </>
+        )}
       </KeyboardAvoidingView>
+
+      <PeerActionsModal
+        visible={menuOpen}
+        peerId={peerId}
+        peerName={peer.username}
+        onClose={() => setMenuOpen(false)}
+        onBlocked={onBack}
+      />
     </View>
   );
 }
@@ -306,10 +404,12 @@ const styles = StyleSheet.create({
   },
   headerText: { flex: 1, marginLeft: 12 },
   headerName: { fontSize: 17, fontWeight: '700' },
+  menuBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   dayWrap: { alignItems: 'center', marginVertical: 10 },
   dayChip: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8 },
   emptyWrap: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
   emptyChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 12 },
+  notice: { marginHorizontal: 12, marginBottom: 4, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 8, paddingTop: 6 },
   inputWrap: { flex: 1, borderRadius: 24, paddingHorizontal: 16, marginRight: 8, justifyContent: 'center' },
   input: {
@@ -331,6 +431,13 @@ const styles = StyleSheet.create({
     borderBottomColor: 'transparent',
     borderLeftColor: '#FFFFFF',
   },
+  requestBar: { paddingHorizontal: 16, paddingTop: 14, borderTopWidth: StyleSheet.hairlineWidth },
+  requestTitle: { fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  requestText: { fontSize: 13.5, lineHeight: 19, marginBottom: 10 },
+  requestBtns: { flexDirection: 'row' },
+  reqBtn: { flex: 1, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginRight: 8 },
+  reqBtnLight: { color: '#FFFFFF', fontWeight: '700', fontSize: 15 },
+  reqBtnText: { fontWeight: '700', fontSize: 15 },
   fabWrap: { position: 'absolute', right: 14, bottom: 12 },
   fab: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
   fabChevron: {

@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
 import { useChat } from '../lib/ChatContext';
+import { useConnections } from '../lib/connections';
 import { USE_NATIVE_DRIVER, useTheme, useThemeMode, type ThemeMode } from '../lib/theme';
 import { Avatar } from './Avatar';
 
@@ -21,6 +22,11 @@ type Props = {
   visible: boolean;
   onClose: () => void;
   onOpenProfile: () => void;
+  onFindPeople: () => void;
+  onOpenRequests: () => void;
+  onOpenBlocked: () => void;
+  onCreateGroup: () => void;
+  onOpenGroupInvites: () => void;
 };
 
 type IconName = React.ComponentProps<typeof Ionicons>['name'];
@@ -38,6 +44,8 @@ function MenuItem({
   color,
   textColor,
   pressedColor,
+  badge = 0,
+  badgeColor,
 }: {
   icon: IconName;
   label: string;
@@ -45,23 +53,43 @@ function MenuItem({
   color: string;
   textColor: string;
   pressedColor: string;
+  badge?: number;
+  badgeColor?: string;
 }) {
   return (
     <Pressable
       onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={badge > 0 ? `${label}, ${badge} new` : label}
       style={({ pressed }) => [styles.item, pressed && { backgroundColor: pressedColor }]}
     >
       <Ionicons name={icon} size={22} color={color} />
       <Text style={[styles.itemLabel, { color: textColor }]}>{label}</Text>
+      {badge > 0 ? (
+        <View style={[styles.badge, { backgroundColor: badgeColor ?? color }]}>
+          <Text style={styles.badgeText}>{badge > 99 ? '99+' : badge}</Text>
+        </View>
+      ) : null}
     </Pressable>
   );
 }
 
-export function Sidebar({ visible, onClose, onOpenProfile }: Props) {
+export function Sidebar({
+  visible,
+  onClose,
+  onOpenProfile,
+  onFindPeople,
+  onOpenRequests,
+  onOpenBlocked,
+  onCreateGroup,
+  onOpenGroupInvites,
+}: Props) {
+  // All hooks live here, inside the component body, before any early return.
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const { me, users, onlineIds, signOut } = useChat();
+  const { incoming, byPeer } = useConnections();
   const [mode, setMode] = useThemeMode();
 
   const drawerWidth = Math.min(320, width * 0.82);
@@ -118,7 +146,20 @@ export function Sidebar({ visible, onClose, onOpenProfile }: Props) {
 
   if (!mounted) return null;
 
-  const onlineCount = users.filter((u) => onlineIds.has(u.id)).length;
+  // Contacts are accepted connections only (pending requests are not contacts yet).
+  let contactCount = 0;
+  let onlineCount = 0;
+  for (const u of users) {
+    if (byPeer[u.id]?.status !== 'accepted') continue;
+    contactCount += 1;
+    if (onlineIds.has(u.id)) onlineCount += 1;
+  }
+
+  /** Close the drawer first, then run the action. */
+  const go = (action: () => void) => () => {
+    onClose();
+    action();
+  };
 
   const handleSignOut = async () => {
     setSigningOut(true);
@@ -129,11 +170,13 @@ export function Sidebar({ visible, onClose, onOpenProfile }: Props) {
     }
   };
 
+  const itemColors = { color: theme.subText, textColor: theme.text, pressedColor: theme.pressed };
+
   return (
     <View style={StyleSheet.absoluteFill}>
       {/* dimmed backdrop */}
       <Animated.View style={[StyleSheet.absoluteFill, styles.backdrop, { opacity: progress }]}>
-        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close menu" />
       </Animated.View>
 
       {/* drawer */}
@@ -149,19 +192,10 @@ export function Sidebar({ visible, onClose, onOpenProfile }: Props) {
       >
         {/* profile card */}
         <Pressable
-          onPress={() => {
-            onClose();
-            onOpenProfile();
-          }}
+          onPress={go(onOpenProfile)}
           style={[styles.profile, { backgroundColor: theme.header, paddingTop: insets.top + 24 }]}
         >
-          <Avatar
-            name={me?.username ?? '?'}
-            size={72}
-            online
-            ringColor={theme.header}
-            onlineColor={theme.online}
-          />
+          <Avatar name={me?.username ?? '?'} size={72} online ringColor={theme.header} onlineColor={theme.online} />
           <Text numberOfLines={1} style={[styles.name, { color: theme.headerText }]}>
             {me?.username ?? ''}
           </Text>
@@ -177,35 +211,31 @@ export function Sidebar({ visible, onClose, onOpenProfile }: Props) {
         </Pressable>
 
         <ScrollView contentContainerStyle={{ paddingVertical: 8 }}>
-          <MenuItem
-            icon="chatbubbles-outline"
-            label="Chats"
-            onPress={onClose}
-            color={theme.subText}
-            textColor={theme.text}
-            pressedColor={theme.pressed}
-          />
-          <MenuItem
-            icon="person-outline"
-            label="My profile"
-            onPress={() => {
-              onClose();
-              onOpenProfile();
-            }}
-            color={theme.subText}
-            textColor={theme.text}
-            pressedColor={theme.pressed}
-          />
+          <MenuItem icon="chatbubbles-outline" label="Chats" onPress={onClose} {...itemColors} />
+          <MenuItem icon="person-outline" label="My profile" onPress={go(onOpenProfile)} {...itemColors} />
 
           <View style={styles.item}>
             <Ionicons name="people-outline" size={22} color={theme.subText} />
             <View style={{ marginLeft: 20, flex: 1 }}>
               <Text style={[styles.itemLabelPlain, { color: theme.text }]}>Contacts</Text>
               <Text style={{ color: theme.subText, fontSize: 12.5, marginTop: 2 }}>
-                {users.length} {users.length === 1 ? 'person' : 'people'} · {onlineCount} online
+                {contactCount} {contactCount === 1 ? 'person' : 'people'} · {onlineCount} online
               </Text>
             </View>
           </View>
+
+          <MenuItem icon="person-add-outline" label="Find people" onPress={go(onFindPeople)} {...itemColors} />
+          <MenuItem icon="people-circle-outline" label="New group" onPress={go(onCreateGroup)} {...itemColors} />
+          <MenuItem icon="mail-outline" label="Group invitations" onPress={go(onOpenGroupInvites)} {...itemColors} />
+          <MenuItem
+            icon="mail-unread-outline"
+            label="Message requests"
+            onPress={go(onOpenRequests)}
+            badge={incoming.length}
+            badgeColor={theme.accent}
+            {...itemColors}
+          />
+          <MenuItem icon="ban-outline" label="Blocked users" onPress={go(onOpenBlocked)} {...itemColors} />
 
           <View style={[styles.divider, { backgroundColor: theme.divider }]} />
 
@@ -220,7 +250,9 @@ export function Sidebar({ visible, onClose, onOpenProfile }: Props) {
                   style={[styles.segmentBtn, active && { backgroundColor: theme.accent }]}
                 >
                   <Ionicons name={m.icon} size={15} color={active ? '#FFFFFF' : theme.subText} />
-                  <Text style={{ color: active ? '#FFFFFF' : theme.subText, fontSize: 13, fontWeight: '600', marginLeft: 5 }}>
+                  <Text
+                    style={{ color: active ? '#FFFFFF' : theme.subText, fontSize: 13, fontWeight: '600', marginLeft: 5 }}
+                  >
                     {m.label}
                   </Text>
                 </Pressable>
@@ -265,8 +297,17 @@ const styles = StyleSheet.create({
   editRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10 },
   editText: { fontSize: 12.5, marginLeft: 5 },
   item: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 22, paddingVertical: 14 },
-  itemLabel: { fontSize: 16, fontWeight: '500', marginLeft: 20 },
+  itemLabel: { flex: 1, fontSize: 16, fontWeight: '500', marginLeft: 20 },
   itemLabelPlain: { fontSize: 16, fontWeight: '500' },
+  badge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    paddingHorizontal: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
   divider: { height: StyleSheet.hairlineWidth, marginVertical: 8, marginHorizontal: 22 },
   section: { fontSize: 12, fontWeight: '700', letterSpacing: 0.8, marginHorizontal: 22, marginTop: 10, marginBottom: 10 },
   segment: { flexDirection: 'row', marginHorizontal: 18, borderRadius: 12, padding: 4 },

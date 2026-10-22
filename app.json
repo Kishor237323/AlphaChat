@@ -1,15 +1,19 @@
 {
   "expo": {
-    "name": "Alpha-chat",
+    "name": "AlphaChat",
     "slug": "Alpha-chat",
+    "scheme": "alphachat",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.kishor237323.alphachat"
     },
     "android": {
+      "package": "com.kishor237323.alphachat",
+      "versionCode": 1,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -19,10 +23,26 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
+      "bundler": "metro",
+      "output": "single",
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-sqlite"
-    ]
+      "expo-sqlite",
+      "expo-font",
+      "expo-web-browser"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "6908cf07-10a5-4f18-9964-255ac8ccc20b"
+      }
+    },
+    "owner": "kishor237323",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/6908cf07-10a5-4f18-9964-255ac8ccc20b"
+    }
   }
 }

@@ -62,15 +62,16 @@ export function lastSeenLabel(iso: string | null): string {
   return `last seen ${d.getDate()} ${MONTHS[d.getMonth()]} at ${formatTime(iso)}`;
 }
 
-export function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+export function initials(name: string | null | undefined): string {
+  const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '?';
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
-export function colorFromString(s: string): string {
+export function colorFromString(s: string | null | undefined): string {
+  const str = s ?? '';
   let hash = 0;
-  for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) | 0;
+  for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) | 0;
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }

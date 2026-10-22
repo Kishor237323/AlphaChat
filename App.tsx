@@ -15,12 +15,24 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import type { Session } from '@supabase/supabase-js';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { ChatProvider, useChat } from './lib/ChatContext';
+import { ConnectionsProvider } from './lib/connections';
+import { GroupsProvider } from './lib/groups';
 import { USE_NATIVE_DRIVER, useTheme } from './lib/theme';
 import { AuthScreen } from './components/AuthScreen';
 import { ChatListScreen } from './components/ChatListScreen';
 import { ChatScreen } from './components/ChatScreen';
+import { GroupChatScreen } from './components/GroupChatScreen';
+import { ChatPrefsProvider } from './lib/chatPrefs';
 
-function CenterMessage({ title, body, action }: { title: string; body?: string; action?: { label: string; onPress: () => void } }) {
+function CenterMessage({
+  title,
+  body,
+  action,
+}: {
+  title: string;
+  body?: string;
+  action?: { label: string; onPress: () => void };
+}) {
   const theme = useTheme();
   return (
     <View style={[styles.center, { backgroundColor: theme.background }]}>
@@ -38,10 +50,11 @@ function CenterMessage({ title, body, action }: { title: string; body?: string; 
 function Main() {
   const theme = useTheme();
   const { width } = useWindowDimensions();
-  const { loading, me, error, reload, signOut } = useChat();
-
+  const { loading, me, error, reload } = useChat();
   const [openId, setOpenId] = useState<string | null>(null);
   const [mountedId, setMountedId] = useState<string | null>(null);
+  const [openGroupId, setOpenGroupId] = useState<string | null>(null);
+  const [mountedGroupId, setMountedGroupId] = useState<string | null>(null);
   const slide = useRef(new Animated.Value(0)).current;
 
   const open = useCallback(
@@ -70,15 +83,44 @@ function Main() {
     });
   }, [slide]);
 
+  const openGroup = useCallback(
+    (id: string) => {
+      setMountedGroupId(id);
+      setOpenGroupId(id);
+      setOpenId(null);
+      setMountedId(null);
+      Animated.timing(slide, {
+        toValue: 1,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: USE_NATIVE_DRIVER,
+      }).start();
+    },
+    [slide]
+  );
+
+  const closeGroup = useCallback(() => {
+    setOpenGroupId(null);
+    Animated.timing(slide, {
+      toValue: 0,
+      duration: 220,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: USE_NATIVE_DRIVER,
+    }).start(({ finished }) => {
+      if (finished) setMountedGroupId(null);
+    });
+  }, [slide]);
+
   // Android hardware back button closes the open chat first.
   useEffect(() => {
-    if (!openId) return;
+    if (!openId && !openGroupId) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      close();
+      if (openGroupId) closeGroup();
+      else close();
       return true;
     });
     return () => sub.remove();
-  }, [openId, close]);
+  }, [openId, openGroupId, close, closeGroup]);
 
   if (loading && !me) {
     return (
@@ -106,7 +148,7 @@ function Main() {
           transform: [{ translateX: slide.interpolate({ inputRange: [0, 1], outputRange: [0, -width * 0.2] }) }],
         }}
       >
-        <ChatListScreen onOpen={open} />
+        <ChatListScreen onOpen={open} onOpenGroup={openGroup} />
       </Animated.View>
 
       {mountedId ? (
@@ -117,6 +159,16 @@ function Main() {
           ]}
         >
           <ChatScreen peerId={mountedId} onBack={close} />
+        </Animated.View>
+      ) : null}
+      {mountedGroupId ? (
+        <Animated.View
+          style={[
+            StyleSheet.absoluteFill,
+            { transform: [{ translateX: slide.interpolate({ inputRange: [0, 1], outputRange: [width, 0] }) }] },
+          ]}
+        >
+          <GroupChatScreen groupId={mountedGroupId} onBack={closeGroup} />
         </Animated.View>
       ) : null}
     </View>
@@ -170,9 +222,17 @@ function Root() {
 
   if (!session) return <AuthScreen />;
 
+  // ConnectionsProvider calls useChat(), so it must sit inside ChatProvider.
+    // ConnectionsProvider calls useChat(), so it must sit inside ChatProvider.
   return (
     <ChatProvider key={session.user.id} userId={session.user.id}>
-      <Main />
+      <GroupsProvider>
+        <ChatPrefsProvider>
+          <ConnectionsProvider>
+            <Main />
+          </ConnectionsProvider>
+        </ChatPrefsProvider>
+      </GroupsProvider>
     </ChatProvider>
   );
 }

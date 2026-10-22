@@ -6,12 +6,12 @@ import React, {
   useMemo,
   useRef,
   useState,
-} from 'react';
-import { AppState } from 'react-native';
-import type { RealtimeChannel } from '@supabase/supabase-js';
-import { supabase } from './supabase';
-import type { Message, Profile } from './types';
-import { uuidv4 } from './utils';
+} from "react";
+import { AppState } from "react-native";
+import type { RealtimeChannel } from "@supabase/supabase-js";
+import { supabase } from "./supabase";
+import type { Message, Profile } from "./types";
+import { uuidv4 } from "./utils";
 
 type MessagesByPeer = Record<string, Message[]>;
 
@@ -36,7 +36,7 @@ const ChatContext = createContext<ChatContextValue | null>(null);
 
 export function useChat(): ChatContextValue {
   const ctx = useContext(ChatContext);
-  if (!ctx) throw new Error('useChat must be used inside <ChatProvider>');
+  if (!ctx) throw new Error("useChat must be used inside <ChatProvider>");
   return ctx;
 }
 
@@ -44,11 +44,12 @@ export function useChat(): ChatContextValue {
 function fire(query: PromiseLike<unknown>): void {
   Promise.resolve(query).then(
     () => undefined,
-    () => undefined
+    () => undefined,
   );
 }
 
-const byTime = (a: Message, b: Message) => Date.parse(a.created_at) - Date.parse(b.created_at);
+const byTime = (a: Message, b: Message) =>
+  Date.parse(a.created_at) - Date.parse(b.created_at);
 
 function upsertMessage(list: Message[], msg: Message): Message[] {
   const idx = list.findIndex((m) => m.id === msg.id);
@@ -76,7 +77,30 @@ function groupByPeer(rows: Message[], meId: string): MessagesByPeer {
   return out;
 }
 
-export function ChatProvider({ userId, children }: { userId: string; children: React.ReactNode }) {
+function normalizeProfile(raw: any): Profile {
+  const picked = [
+    raw?.username,
+    raw?.full_name,
+    raw?.name,
+    raw?.display_name,
+  ].find((v) => typeof v === "string" && v.trim().length > 0) as
+    | string
+    | undefined;
+  return {
+    id: String(raw.id),
+    username: picked ? picked.trim() : `User ${String(raw.id).slice(0, 4)}`,
+    last_seen: raw.last_seen ?? null,
+    created_at: raw.created_at ?? raw.updated_at ?? new Date().toISOString(),
+  };
+}
+
+export function ChatProvider({
+  userId,
+  children,
+}: {
+  userId: string;
+  children: React.ReactNode;
+}) {
   const [me, setMe] = useState<Profile | null>(null);
   const [users, setUsers] = useState<Profile[]>([]);
   const [messages, setMessages] = useState<MessagesByPeer>({});
@@ -88,7 +112,9 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
   const channelRef = useRef<RealtimeChannel | null>(null);
   const messagesRef = useRef<MessagesByPeer>({});
   const activePeerRef = useRef<string | null>(null);
-  const typingTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const typingTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>(
+    {},
+  );
   const myTypingTo = useRef<string | null>(null);
   const lastTypingSent = useRef(0);
   const typingStopTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -106,36 +132,36 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
       setMessages((prev) => ({
         ...prev,
         [peerId]: (prev[peerId] ?? []).map((m) =>
-          m.sender_id === peerId && !m.read_at ? { ...m, read_at: now } : m
+          m.sender_id === peerId && !m.read_at ? { ...m, read_at: now } : m,
         ),
       }));
       const { error: err } = await supabase
-        .from('messages')
+        .from("messages")
         .update({ read_at: now })
-        .eq('receiver_id', userId)
-        .eq('sender_id', peerId)
-        .is('read_at', null);
-      if (err) console.warn('markRead failed:', err.message);
+        .eq("receiver_id", userId)
+        .eq("sender_id", peerId)
+        .is("read_at", null);
+      if (err) console.warn("markRead failed:", err.message);
     },
-    [userId]
+    [userId],
   );
 
   /* ------------------------------- initial load ------------------------------ */
 
   const loadAll = useCallback(async () => {
     const [profilesRes, messagesRes] = await Promise.all([
-      supabase.from('profiles').select('*'),
+      supabase.from("profiles").select("*"),
       supabase
-        .from('messages')
-        .select('*')
+        .from("messages")
+        .select("*")
         .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
-        .order('created_at', { ascending: false })
+        .order("created_at", { ascending: false })
         .limit(1000),
     ]);
     if (profilesRes.error) throw new Error(profilesRes.error.message);
     if (messagesRes.error) throw new Error(messagesRes.error.message);
 
-    const all = (profilesRes.data ?? []) as Profile[];
+    const all = ((profilesRes.data ?? []) as any[]).map(normalizeProfile);
     let mine = all.find((p) => p.id === userId) ?? null;
 
     if (!mine) {
@@ -143,10 +169,14 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
       const { data: u } = await supabase.auth.getUser();
       const username =
         (u.user?.user_metadata?.username as string | undefined) ??
-        u.user?.email?.split('@')[0] ??
-        'user';
-      const ins = await supabase.from('profiles').upsert({ id: userId, username }).select().single();
-      if (!ins.error && ins.data) mine = ins.data as Profile;
+        u.user?.email?.split("@")[0] ??
+        "user";
+      const ins = await supabase
+        .from("profiles")
+        .upsert({ id: userId, username })
+        .select()
+        .single();
+      if (!ins.error && ins.data) mine = normalizeProfile(ins.data);
     }
 
     setMe(mine);
@@ -172,10 +202,10 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
     if (rows.some((m) => m.receiver_id === userId && !m.delivered_at)) {
       fire(
         supabase
-          .from('messages')
+          .from("messages")
           .update({ delivered_at: new Date().toISOString() })
-          .eq('receiver_id', userId)
-          .is('delivered_at', null)
+          .eq("receiver_id", userId)
+          .is("delivered_at", null),
       );
     }
     if (activePeerRef.current) void markRead(activePeerRef.current, true);
@@ -186,7 +216,7 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
       setError(null);
       await loadAll();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load chats');
+      setError(e instanceof Error ? e.message : "Failed to load chats");
     } finally {
       setLoading(false);
     }
@@ -197,24 +227,33 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
   const handleIncoming = useCallback(
     (msg: Message) => {
       const peer = msg.sender_id;
-      setMessages((prev) => ({ ...prev, [peer]: upsertMessage(prev[peer] ?? [], msg) }));
+      setMessages((prev) => ({
+        ...prev,
+        [peer]: upsertMessage(prev[peer] ?? [], msg),
+      }));
       setTypingIds((prev) => (prev[peer] ? { ...prev, [peer]: false } : prev));
       fire(
         supabase
-          .from('messages')
+          .from("messages")
           .update({ delivered_at: new Date().toISOString() })
-          .eq('id', msg.id)
+          .eq("id", msg.id),
       );
-      if (activePeerRef.current === peer && AppState.currentState === 'active') {
+      if (
+        activePeerRef.current === peer &&
+        AppState.currentState === "active"
+      ) {
         setTimeout(() => void markRead(peer, true), 0);
       }
     },
-    [markRead]
+    [markRead],
   );
 
   const handleUpdate = useCallback((msg: Message) => {
     const peer = msg.receiver_id;
-    setMessages((prev) => ({ ...prev, [peer]: upsertMessage(prev[peer] ?? [], msg) }));
+    setMessages((prev) => ({
+      ...prev,
+      [peer]: upsertMessage(prev[peer] ?? [], msg),
+    }));
   }, []);
 
   const handleProfileChange = useCallback(
@@ -231,7 +270,7 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
         return next;
       });
     },
-    [userId]
+    [userId],
   );
 
   /* ------------------------------ channel lifecycle -------------------------- */
@@ -242,20 +281,25 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
 
     void reload();
 
-    const channel = supabase.channel('alpha-chat-room', {
+    const channel = supabase.channel("alpha-chat-room", {
       config: { presence: { key: userId }, broadcast: { self: false } },
     });
     channelRef.current = channel;
 
     channel
-      .on('presence', { event: 'sync' }, () => {
+      .on("presence", { event: "sync" }, () => {
         if (cancelled) return;
         setOnlineIds(new Set(Object.keys(channel.presenceState())));
       })
-      .on('broadcast', { event: 'typing' }, ({ payload }) => {
-        const { from, to, typing } = (payload ?? {}) as { from?: string; to?: string; typing?: boolean };
+      .on("broadcast", { event: "typing" }, ({ payload }) => {
+        const { from, to, typing } = (payload ?? {}) as {
+          from?: string;
+          to?: string;
+          typing?: boolean;
+        };
         if (!from || to !== userId || cancelled) return;
-        if (typingTimers.current[from]) clearTimeout(typingTimers.current[from]);
+        if (typingTimers.current[from])
+          clearTimeout(typingTimers.current[from]);
         setTypingIds((prev) => ({ ...prev, [from]: !!typing }));
         if (typing) {
           // safety net: if the "stopped typing" event is lost, clear it after 4s
@@ -265,22 +309,39 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
         }
       })
       .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages', filter: `receiver_id=eq.${userId}` },
-        (payload) => handleIncoming(payload.new as unknown as Message)
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "messages",
+          filter: `receiver_id=eq.${userId}`,
+        },
+        (payload) => handleIncoming(payload.new as unknown as Message),
       )
       .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages', filter: `sender_id=eq.${userId}` },
-        (payload) => handleUpdate(payload.new as unknown as Message)
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "messages",
+          filter: `sender_id=eq.${userId}`,
+        },
+        (payload) => handleUpdate(payload.new as unknown as Message),
       )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, (payload) => {
-        if (payload.eventType === 'DELETE') return;
-        handleProfileChange(payload.new as unknown as Profile);
-      })
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "profiles" },
+        (payload) => {
+          if (payload.eventType === "DELETE") return;
+          handleProfileChange(normalizeProfile(payload.new));
+        },
+      )
       .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          void channel.track({ user_id: userId, online_at: new Date().toISOString() });
+        if (status === "SUBSCRIBED") {
+          void channel.track({
+            user_id: userId,
+            online_at: new Date().toISOString(),
+          });
           if (subscribedBefore) void reload(); // reconnected: catch up on what we missed
           subscribedBefore = true;
         }
@@ -299,15 +360,22 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
   /* ---------------------- foreground / background = online / offline --------- */
 
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (state) => {
+    const sub = AppState.addEventListener("change", (state) => {
       const ch = channelRef.current;
-      if (state === 'active') {
-        if (ch) void ch.track({ user_id: userId, online_at: new Date().toISOString() });
+      if (state === "active") {
+        if (ch)
+          void ch.track({
+            user_id: userId,
+            online_at: new Date().toISOString(),
+          });
         void reload();
-      } else if (state === 'background') {
+      } else if (state === "background") {
         if (ch) void ch.untrack();
         fire(
-          supabase.from('profiles').update({ last_seen: new Date().toISOString() }).eq('id', userId)
+          supabase
+            .from("profiles")
+            .update({ last_seen: new Date().toISOString() })
+            .eq("id", userId),
         );
       }
     });
@@ -320,15 +388,22 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
     (peerId: string, typing: boolean) => {
       const ch = channelRef.current;
       if (!ch) return;
-      void ch.send({ type: 'broadcast', event: 'typing', payload: { from: userId, to: peerId, typing } });
+      void ch.send({
+        type: "broadcast",
+        event: "typing",
+        payload: { from: userId, to: peerId, typing },
+      });
     },
-    [userId]
+    [userId],
   );
 
   const notifyTyping = useCallback(
     (peerId: string) => {
       const now = Date.now();
-      if (myTypingTo.current !== peerId || now - lastTypingSent.current > 2500) {
+      if (
+        myTypingTo.current !== peerId ||
+        now - lastTypingSent.current > 2500
+      ) {
         sendTyping(peerId, true);
         lastTypingSent.current = now;
       }
@@ -339,7 +414,7 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
         myTypingTo.current = null;
       }, 2000);
     },
-    [sendTyping]
+    [sendTyping],
   );
 
   const stopTyping = useCallback(
@@ -350,7 +425,7 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
         myTypingTo.current = null;
       }
     },
-    [sendTyping]
+    [sendTyping],
   );
 
   /* -------------------------------- sending ---------------------------------- */
@@ -358,17 +433,17 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
   const insertMessage = useCallback(
     async (peerId: string, id: string, content: string) => {
       const { data, error: err } = await supabase
-        .from('messages')
+        .from("messages")
         .insert({ id, sender_id: userId, receiver_id: peerId, content })
         .select()
         .single();
 
-      if (err && err.code === '23505') {
+      if (err && err.code === "23505") {
         // duplicate id: an earlier attempt actually reached the server
         setMessages((prev) => ({
           ...prev,
           [peerId]: (prev[peerId] ?? []).map((m) =>
-            m.id === id ? { ...m, pending: false, failed: false } : m
+            m.id === id ? { ...m, pending: false, failed: false } : m,
           ),
         }));
         return;
@@ -377,7 +452,7 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
         setMessages((prev) => ({
           ...prev,
           [peerId]: (prev[peerId] ?? []).map((m) =>
-            m.id === id ? { ...m, pending: false, failed: true } : m
+            m.id === id ? { ...m, pending: false, failed: true } : m,
           ),
         }));
         return;
@@ -387,7 +462,7 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
         [peerId]: upsertMessage(prev[peerId] ?? [], data as Message),
       }));
     },
-    [userId]
+    [userId],
   );
 
   const sendMessage = useCallback(
@@ -405,26 +480,31 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
         read_at: null,
         pending: true,
       };
-      setMessages((prev) => ({ ...prev, [peerId]: upsertMessage(prev[peerId] ?? [], optimistic) }));
+      setMessages((prev) => ({
+        ...prev,
+        [peerId]: upsertMessage(prev[peerId] ?? [], optimistic),
+      }));
       stopTyping(peerId);
       await insertMessage(peerId, id, content);
     },
-    [userId, stopTyping, insertMessage]
+    [userId, stopTyping, insertMessage],
   );
 
   const retryMessage = useCallback(
     async (peerId: string, messageId: string) => {
-      const msg = (messagesRef.current[peerId] ?? []).find((m) => m.id === messageId);
+      const msg = (messagesRef.current[peerId] ?? []).find(
+        (m) => m.id === messageId,
+      );
       if (!msg) return;
       setMessages((prev) => ({
         ...prev,
         [peerId]: (prev[peerId] ?? []).map((m) =>
-          m.id === messageId ? { ...m, pending: true, failed: false } : m
+          m.id === messageId ? { ...m, pending: true, failed: false } : m,
         ),
       }));
       await insertMessage(peerId, messageId, msg.content);
     },
-    [insertMessage]
+    [insertMessage],
   );
 
   const setActivePeer = useCallback(
@@ -432,12 +512,15 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
       activePeerRef.current = peerId;
       if (peerId) void markRead(peerId);
     },
-    [markRead]
+    [markRead],
   );
 
   const signOut = useCallback(async () => {
     try {
-      await supabase.from('profiles').update({ last_seen: new Date().toISOString() }).eq('id', userId);
+      await supabase
+        .from("profiles")
+        .update({ last_seen: new Date().toISOString() })
+        .eq("id", userId);
       await channelRef.current?.untrack();
     } catch {
       // ignore: we are leaving anyway
@@ -463,9 +546,21 @@ export function ChatProvider({ userId, children }: { userId: string; children: R
       signOut,
     }),
     [
-      me, users, messages, onlineIds, typingIds, loading, error,
-      sendMessage, retryMessage, notifyTyping, stopTyping, setActivePeer, reload, signOut,
-    ]
+      me,
+      users,
+      messages,
+      onlineIds,
+      typingIds,
+      loading,
+      error,
+      sendMessage,
+      retryMessage,
+      notifyTyping,
+      stopTyping,
+      setActivePeer,
+      reload,
+      signOut,
+    ],
   );
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

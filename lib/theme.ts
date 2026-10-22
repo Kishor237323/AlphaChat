@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Platform, useColorScheme } from 'react-native';
 
 export const USE_NATIVE_DRIVER = Platform.OS !== 'web';
@@ -77,7 +78,38 @@ const dark: Theme = {
   chipText: '#8696A0',
 };
 
+/* ----------------------- manual theme override (in memory) ----------------------- */
+
+export type ThemeMode = 'system' | 'light' | 'dark';
+
+let currentMode: ThemeMode = 'light';
+const listeners = new Set<() => void>();
+
+export function setThemeMode(next: ThemeMode) {
+  currentMode = next;
+  listeners.forEach((l) => l());
+}
+
+function useModeSubscription() {
+  const [, force] = useState(0);
+  useEffect(() => {
+    const l = () => force((n) => n + 1);
+    listeners.add(l);
+    return () => {
+      listeners.delete(l);
+    };
+  }, []);
+}
+
+/** Current mode ('system' | 'light' | 'dark') plus a setter. */
+export function useThemeMode(): [ThemeMode, (m: ThemeMode) => void] {
+  useModeSubscription();
+  return [currentMode, setThemeMode];
+}
+
 export function useTheme(): Theme {
   const scheme = useColorScheme();
-  return scheme === 'dark' ? dark : light;
+  useModeSubscription();
+  const effective = currentMode === 'system' ? scheme : currentMode;
+  return effective === 'dark' ? dark : light;
 }

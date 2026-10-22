@@ -24,7 +24,8 @@ import type { Message } from '../lib/types';
 import { dayKey, dayLabel, lastSeenLabel } from '../lib/utils';
 import { Avatar } from './Avatar';
 import { MessageBubble } from './MessageBubble';
-import { PeerActionsModal } from './PeerActionsModal';
+import { PeerActionsModal } from './PeeractionsModal';
+import { PeerProfileModal } from './PeerProfileModal';
 import { TypingBubble } from './TypingIndicator';
 
 const EMPTY_LIST: Message[] = [];
@@ -126,6 +127,7 @@ export function ChatScreen({ peerId, onBack }: { peerId: string; onBack: () => v
   const [newCount, setNewCount] = useState(0);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [deciding, setDeciding] = useState(false);
   const [decideError, setDecideError] = useState<string | null>(null);
   const listRef = useRef<FlatList<Row>>(null);
@@ -264,13 +266,23 @@ export function ChatScreen({ peerId, onBack }: { peerId: string; onBack: () => v
         <Pressable onPress={handleBack} hitSlop={14} style={styles.backBtn}>
           <View style={[styles.backChevron, { borderColor: theme.headerText }]} />
         </Pressable>
-        <Avatar name={peer.username} size={40} online={isOnline} ringColor={theme.header} onlineColor={theme.online} />
-        <View style={styles.headerText}>
-          <Text numberOfLines={1} style={[styles.headerName, { color: theme.headerText }]}>
-            {peer.username}
-          </Text>
-          <StatusLine text={statusText} color={statusColor} />
-        </View>
+
+        {/* tapping the avatar or name opens their profile */}
+        <Pressable
+          onPress={() => setProfileOpen(true)}
+          style={styles.profileBtn}
+          accessibilityRole="button"
+          accessibilityLabel={`View ${peer.username}'s profile`}
+        >
+          <Avatar name={peer.username} size={40} online={isOnline} ringColor={theme.header} onlineColor={theme.online} />
+          <View style={styles.headerText}>
+            <Text numberOfLines={1} style={[styles.headerName, { color: theme.headerText }]}>
+              {peer.username}
+            </Text>
+            <StatusLine text={statusText} color={statusColor} />
+          </View>
+        </Pressable>
+
         <Pressable onPress={() => setMenuOpen(true)} hitSlop={12} style={styles.menuBtn} accessibilityLabel="More">
           <Ionicons name="ellipsis-vertical" size={22} color={theme.headerText} />
         </Pressable>
@@ -380,6 +392,13 @@ export function ChatScreen({ peerId, onBack }: { peerId: string; onBack: () => v
         )}
       </KeyboardAvoidingView>
 
+      <PeerProfileModal
+        visible={profileOpen}
+        peerId={peerId}
+        onClose={() => setProfileOpen(false)}
+        onBlocked={onBack}
+      />
+
       <PeerActionsModal
         visible={menuOpen}
         peerId={peerId}
@@ -402,12 +421,13 @@ const styles = StyleSheet.create({
     transform: [{ rotate: '45deg' }],
     marginLeft: 4,
   },
+  profileBtn: { flex: 1, flexDirection: 'row', alignItems: 'center' },
   headerText: { flex: 1, marginLeft: 12 },
   headerName: { fontSize: 17, fontWeight: '700' },
   menuBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
   dayWrap: { alignItems: 'center', marginVertical: 10 },
   dayChip: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8 },
-  emptyWrap: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center' },
+  emptyWrap: { ...StyleSheet.absoluteFill, alignItems: 'center', justifyContent: 'center' },
   emptyChip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 12 },
   notice: { marginHorizontal: 12, marginBottom: 4, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
   inputBar: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 8, paddingTop: 6 },

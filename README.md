@@ -1,116 +1,229 @@
-# Alpha Chat
+<div align="center">
 
-Alpha Chat is a mobile messaging application built with **React Native, Expo, TypeScript, and Supabase**. The project is currently under development.
+# AlphaChat
 
-## Project status
+**A real-time chat app with direct messages, group chats and privacy controls. One codebase for Android, iOS and web.**
 
-The current development focus is authentication and user profiles. Real-time conversations and additional messaging features are planned next; they should not be considered production-ready until implemented and tested.
+![Expo](https://img.shields.io/badge/Expo-React%20Native-000020?logo=expo&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
+![Supabase](https://img.shields.io/badge/Supabase-Postgres%20%2B%20Realtime-3FCF8E?logo=supabase&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-blue)
 
-## Planned features
+</div>
 
-- Email and password authentication
-- Persistent login sessions
-- User profiles and display names
-- User directory
-- One-to-one real-time messaging
-- Group conversations
-- Online status, typing indicators, and read receipts
-- Image and profile-picture sharing
-- Push notifications
-- Privacy, blocking, and reporting controls
+<!-- Add screenshots here: docs/screenshots/chat-list.png, chat.png, group.png -->
 
-## Technology stack
+---
 
-- **Mobile:** React Native, Expo, TypeScript
-- **Authentication:** Supabase Auth
-- **Database:** Supabase PostgreSQL
-- **Real-time functionality:** Supabase Realtime
-- **Media storage:** Supabase Storage
-- **Version control:** Git and GitHub
+## Overview
 
-## Prerequisites
+AlphaChat is a WhatsApp-style messenger built with **React Native (Expo)** and **Supabase**. Users sign in, find each other by username, and chat one-to-one or in groups. Messages, presence, typing state and group changes arrive over Supabase Realtime.
 
-Install the following before running the project:
+Privacy is built into the data layer. Nobody can browse a list of all users, strangers must send a message request first, and every group action is checked on the server.
 
-- [Node.js LTS](https://nodejs.org/)
-- [Git](https://git-scm.com/)
-- [Expo Go](https://expo.dev/go) on an Android device for initial testing, or an appropriate development environment for an emulator
-- A [Supabase account](https://supabase.com/)
+## Features
+
+### Direct messaging
+- Real-time delivery with **sent, delivered and read ticks**
+- **Typing indicator** and **online / last seen** presence
+- Optimistic sending with **tap-to-retry** for failed messages
+- Day separators, scroll-to-bottom button with a new-message counter
+- Tappable chat header that opens the other person's **profile card**
+
+### Privacy and safety
+- **Find people by username** (search needs 3+ characters, no public directory)
+- **Message requests**: until the other person accepts, you can send only 3 intro messages, and they see no read receipts
+- **Block / unblock** and **report** (spam, harassment, impersonation, inappropriate content, other)
+
+### Groups
+- Roles: **owner, admin, member**
+- Join modes: **open**, **approval** (admins review requests) and **closed**
+- Invite by username or by shareable **invite code**, with code rotation
+- Message **replies, @mentions, emoji reactions, pinned messages** and soft delete ("This message was deleted")
+- Moderation: **admins-only posting**, **slow mode**, **mute** (timed), **remove and ban**, **report message**, ownership transfer
+- System notices ("X joined", "X was removed"), unread and mention counts
+
+### Chat list
+- Right-click (web) or long-press (mobile) menu: **open, mark as unread, pin (max 3), mute, archive, delete**, plus **Group info** and **Leave group** for groups
+- Filters for All, Unread and Online, plus an Archived view
+- These preferences are stored on the device, per account
+
+### App
+- Email sign-in and **Google OAuth**
+- **Light, dark and system** themes
+- Session persists across restarts
+
+## Tech stack
+
+| Layer | Technology |
+|---|---|
+| App | React Native with Expo, TypeScript |
+| Backend | Supabase: Postgres, Auth, Realtime, Row Level Security, RPC functions |
+| Session storage | `expo-sqlite` key-value store on native, `localStorage` on web |
+| Auth | Supabase Auth (email, Google via `expo-auth-session`) |
+| UI | Core React Native components, Ionicons, `Animated` API |
+
+## Project structure
+
+```
+.
+├── App.tsx                  # Root: auth gate, providers, screen transitions
+├── index.ts                 # Expo entry point
+├── app.json                 # Expo configuration
+├── components/              # Screens, modals and UI pieces
+│   ├── AuthScreen.tsx
+│   ├── ChatListScreen.tsx   # Combined list of direct chats and groups
+│   ├── ChatScreen.tsx       # 1:1 conversation
+│   ├── GroupChatScreen.tsx  # Group conversation
+│   ├── GroupInfoScreen.tsx  # Members, settings, reports
+│   ├── ChatContextMenu.tsx  # Right-click / long-press menu
+│   ├── PeerProfileModal.tsx # Profile card of the other person
+│   └── ...                  # Modals, bubbles, avatars, indicators
+├── lib/
+│   ├── supabase.ts          # Supabase client and config checks
+│   ├── ChatContext.tsx      # Users, messages, presence, typing
+│   ├── connections.tsx      # Message requests, blocks, reports
+│   ├── groups.tsx           # Group list state and realtime refresh
+│   ├── groupApi.ts          # Typed wrappers for the group RPC functions
+│   ├── chatPrefs.tsx        # Pin / mute / archive preferences (on-device)
+│   ├── googleAuth.ts        # OAuth flow for web and native
+│   ├── theme.ts             # Light and dark themes
+│   └── utils.ts             # Time formatting, avatar colours
+└── assets/                  # Icons and splash images
+```
+
+## Architecture
+
+```
+React Native UI (components/)
+        │  hooks: useChat · useConnections · useGroups · useChatPrefs
+        ▼
+Context providers (lib/)         ← state, realtime subscriptions
+        │
+        ▼
+Supabase client ── Realtime (postgres_changes)
+        │
+        ▼
+Postgres: tables protected by RLS + security-definer RPC functions
+```
+
+- **Reads** go through Row Level Security: you can only read a group's rows if you are a member.
+- **Writes that change who can do what** (join, remove, mute, pin, ...) go through `security definer` RPC functions that check the caller's role first.
+- **Chat messages** are inserted directly. A database trigger checks membership, mute, slow mode and admins-only rules, and fills in the sender name and reply preview so they cannot be spoofed.
+- Providers nest as `ChatProvider → GroupsProvider → ChatPrefsProvider → ConnectionsProvider`.
 
 ## Getting started
 
-### 1. Clone the repository
+### Prerequisites
+- Node.js 20 or newer
+- npm
+- A free [Supabase](https://supabase.com) project
+- For phone testing: the **Expo Go** app, or an Android or iOS device or emulator
+
+### 1. Clone and install
 
 ```bash
 git clone https://github.com/Kishor237323/AlphaChat.git
 cd AlphaChat
+npm install
 ```
 
-### 2. Install dependencies
+### 2. Configure environment variables
+
+Create a `.env` file in the project root:
 
 ```bash
-npm ci
+EXPO_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=YOUR-PUBLIC-ANON-KEY
 ```
 
-If `npm ci` fails because the lockfile is out of sync with `package.json`, run `npm install` and review the changes before committing them.
+Use the **anon / publishable** key from *Supabase → Project Settings → API*. Never put the `service_role` key in an Expo app.
 
-### 3. Configure Supabase
+### 3. Set up the database
 
-Create a Supabase project and obtain its Project URL and publishable key. Add a `.env` file in the project root:
+1. Open *Supabase → SQL Editor*.
+2. Run the schema scripts from the `supabase/` folder in order (core chat tables first, then the groups migration).
+3. In *Database → Replication*, make sure Realtime is enabled for the chat and group tables.
+4. After any function change, run `notify pgrst, 'reload schema';`.
 
-```env
-EXPO_PUBLIC_SUPABASE_URL=https://YOUR_PROJECT.supabase.co
-EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=YOUR_PUBLISHABLE_KEY
-```
+### 4. Enable authentication
 
-Replace the example values with your project's values. Never place a Supabase secret key, service-role key, database password, or other privileged credential in the mobile app. Keep `.env` out of Git; commit only safe example configuration such as `.env.example`.
+- **Email:** enabled by default in Supabase.
+- **Google:** enable the provider in *Authentication → Providers* and add your redirect URLs (see below).
 
-Before using profile or messaging features, make sure the required Supabase tables, migrations, grants, and Row Level Security (RLS) policies have been applied and tested.
-
-### 4. Start the Expo development server
-
-```bash
-npx expo start
-```
-
-Follow the terminal instructions to open the app in Expo Go or an appropriate emulator. If you encounter a stale Metro cache, try:
+### 5. Run the app
 
 ```bash
 npx expo start -c
 ```
 
-## Security notes
+Press `w` for web, scan the QR code with Expo Go, or press `a` or `i` for an emulator. Add `--tunnel` if your phone and computer are not on the same network.
 
-- Do not commit `.env` or any private credentials.
-- Never ship Supabase service-role or secret keys in the application.
-- Enable and test Row Level Security for tables exposed through the Supabase API.
-- Restrict conversation and message access to authorised members on the database side; hiding UI controls is not sufficient security.
-- Do not use real users' private messages or personal data for testing without appropriate safeguards.
+## Google sign-in redirect URLs
 
-## Development workflow
+Add these under *Authentication → URL Configuration → Redirect URLs*:
 
-1. Create a branch for each feature or fix.
-2. Make one focused change at a time.
-3. Test authentication and relevant screens on a device or emulator.
-4. Review database migrations and RLS policies before applying them.
-5. Commit only files that belong in the project; never commit local environment files or build artifacts.
+| Platform | URL |
+|---|---|
+| Web (dev) | `http://localhost:8081` |
+| Web (prod) | your deployed site URL |
+| Native | the URL printed by `makeRedirectUri()` for your build |
+
+
+you can download using the below link ---> 
+https://expo.dev/artifacts/eas/V7bAkXp_ShotSXTYzAr8QZRbcoOIGrqoYKRJWocP-Dk.apk
+
+## Building and releasing
+
+```bash
+npm install -g eas-cli
+eas login
+
+# Installable Android build (APK) for testing
+eas build -p android --profile preview
+
+# Publish a JavaScript-only update to installed apps
+eas update --branch production --message "describe the change"
+
+# Static web build
+npx expo export -p web
+```
+
+JavaScript-only changes can ship through `eas update`. Adding a native package needs a new `eas build`.
+
+## Security
+
+- **Row Level Security is enabled** on all group tables. Clients can read only what membership allows.
+- **Privileged actions are RPC functions** with explicit role checks, never client-side checks alone.
+- **Only the public anon key belongs in the app.** Do not commit `.env`, and do not commit a `lib/localConfig.ts` containing real keys. It is listed in `.gitignore` for that reason.
+- **Reports keep a snapshot** of the reported message, so deleting it does not erase the evidence.
+- To report a vulnerability, open a private security advisory on GitHub rather than a public issue.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `Could not find the function public.create_group ... in the schema cache` | The migration was not run, or the cache is stale. Run it, then `notify pgrst, 'reload schema';` |
+| "Supabase is not configured" screen | `.env` is missing or Expo did not load it. Restart with `npx expo start -c` |
+| `useChatPrefs must be used inside ChatPrefsProvider` | Wrap the app as shown in the Architecture section |
+| Realtime updates do not arrive | Enable Realtime for the tables in the Supabase dashboard |
+| Google sign-in returns to a blank page | Add the exact redirect URL to Supabase's allow list |
 
 ## Roadmap
 
-- [ ] Verify signup, email confirmation, login, session restoration, and logout
-- [ ] Verify profile creation and display-name updates
-- [ ] Secure conversation and membership schema with RLS
-- [ ] Implement real-time one-to-one text messaging
-- [ ] Add group chats and message history pagination
-- [ ] Add typing indicators, presence, unread counts, and read receipts
-- [ ] Add secure image uploads and profile pictures
-- [ ] Add push notifications using a development build
-- [ ] Add blocking/reporting controls and complete security testing
+- [ ] Push notifications
+- [ ] Image and file sharing
+- [ ] Sync pin / archive / mute across devices
+- [ ] Message search
+- [ ] End-to-end encryption (the group schema already tracks a key epoch)
+- [ ] Automated tests and CI
 
 ## Contributing
 
-This project is under active development. For changes, keep the existing project structure, follow TypeScript conventions, test affected flows, and document any required Supabase migration or configuration change.
+1. Fork the repository and create a branch: `git checkout -b feature/your-feature`
+2. Keep TypeScript strict and run `npx tsc --noEmit` before committing
+3. Open a pull request that describes what changed and how you tested it
 
 ## License
 
-See the [`LICENSE`](LICENSE) file for the project's license terms.
+Released under the [MIT License](LICENSE).
